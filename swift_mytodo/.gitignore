@@ -2,3 +2,5 @@
 .chalice/deployments/
 .chalice/venv/
 data/*
+credential.txt
+__pycache__/

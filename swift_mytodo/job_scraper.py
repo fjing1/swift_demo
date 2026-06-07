@@ -1,87 +1,73 @@
+"""Job scraper (free stack).
+
+Replaces the paid Apify "google-jobs-scraper" actor with the free, open-source
+python-jobspy library (https://github.com/Bunsly/JobSpy), which scrapes Indeed,
+Google, LinkedIn, Glassdoor and ZipRecruiter. Results are written to the local
+document store instead of AWS OpenSearch.
+
+Run directly (recommended free path, e.g. from cron):
+    python job_scraper.py
+"""
 import os
-import boto3
-from chalice import Chalice, AuthResponse, Rate
-from chalicelib import auth, db
+
 import pandas as pd
-from apify_client import ApifyClient
-from datetime import datetime
-from opensearchpy import OpenSearch, helpers
+from jobspy import scrape_jobs
 
-app = Chalice(app_name='mytodo')
-app.debug = True
-_DB = None
-_USER_DB = None
-apify_client = ApifyClient('') # fill with api key inside ''
+import utils
 
-# Define locations as a global variable
-locations = {"w+CAIQICIHVG9yb250bw==": "Toronto", "w+CAIQICIJVmFuY291dmVy": "Vancourver", "w+CAIQICIITW9udHJlYWw=": "Montreal"}
+JOB_TITLES = ["Software Engineer", "Data Engineer", "Data Scientist"]
+LOCATIONS = ["Toronto, ON", "Vancouver, BC", "Montreal, QC"]
 
-def get_job_data(uule, jt):
-    run_input = {
-        "csvFriendlyOutput": True,
-        "includeUnfilteredResults": False,
-        "maxConcurrency": 10,
-        "maxPagesPerQuery": 4,
-        "queries": f"https://www.google.com/search?ibp=htl;jobs&q={jt}&uule={uule}",
-        "saveHtml": False,
-        "saveHtmlToKeyValueStore": False,
-    }
+# Which job boards to scrape (comma-separated env override).
+SITES = os.environ.get("JOBSPY_SITES", "indeed,google").split(",")
+RESULTS_WANTED = int(os.environ.get("JOBSPY_RESULTS", "20"))
+HOURS_OLD = int(os.environ.get("JOBSPY_HOURS_OLD", "72"))
+COUNTRY = os.environ.get("JOBSPY_COUNTRY", "Canada")
 
-    actor_call = apify_client.actor('dan.scraper/google-jobs-scraper').call(run_input=run_input)
-    dataset_items = apify_client.dataset(actor_call['defaultDatasetId']).list_items().items
+JOBS_INDEX = "jobs"
 
-    d = pd.DataFrame(dataset_items)
-    d["query"] = jt
-    d["location"] = locations[uule]
-    d["run_time"] = str(datetime.now())
 
-    return d
-
-def save_to_es(df):
-    host = '' #put your host here
-    port = 443
-    auth = ('swift', 'Hire123!') # For testing only. Don't store credentials in code.
-
-    client = OpenSearch(
-        hosts = [{'host': host, 'port': port}],
-        http_compress = True, # enables gzip compression for request bodies
-        http_auth = auth,
-        use_ssl = True,
-        ssl_assert_hostname = False,
-        ssl_show_warn = False,
+def get_job_data(job_title, location):
+    """Scrape jobs for one title/location and return a tidy DataFrame."""
+    df = scrape_jobs(
+        site_name=SITES,
+        search_term=job_title,
+        google_search_term=f"{job_title} jobs near {location}",
+        location=location,
+        results_wanted=RESULTS_WANTED,
+        hours_old=HOURS_OLD,
+        country_indeed=COUNTRY,
     )
 
-    index_name = "swift_dev_felix_kelly"
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    if not client.indices.exists(index_name):
-        client.indices.create(index=index_name)
+    df = df.copy()
+    df["query"] = job_title
+    df["search_location"] = location
+    # Expose the listing URL as `applyLink` so the matching prompt can cite it.
+    if "job_url" in df.columns:
+        df["applyLink"] = df["job_url"]
+    return df
 
-    def doc_generator(df):
-        for i, row in df.iterrows():
-            doc = {
-                "_index": index_name,
-                "_source": row.to_dict(),
-            }
-            yield doc
 
-    helpers.bulk(client, doc_generator(df))
-
-    print("Data Saved to Elastic Search dashboard Done.")
-
-@app.schedule(Rate(24, unit=Rate.HOURS))
-def every_week(event):
+def scrape_all():
+    """Scrape every title x location combination and save to the local store."""
     position_df = pd.DataFrame()
-    job_titles = ["Software Engineer",  "Data Engineer", "Data Scientist"]
 
-    for uule in locations:
-        print(locations[uule])
-        for jt in job_titles:
+    for location in LOCATIONS:
+        print(location)
+        for jt in JOB_TITLES:
             print(jt)
-            d = get_job_data(uule, jt)
-            position_df = pd.concat([position_df, d])
+            d = get_job_data(jt, location)
+            print(f"  -> {len(d)} jobs")
+            position_df = pd.concat([position_df, d], ignore_index=True)
+        print("=" * 30)
 
-        print("="*30)
+    print("Saving scraped jobs to local store")
+    utils.save_documents(JOBS_INDEX, position_df, dedupe_on="applyLink")
+    return position_df
 
-    position_df.drop(columns='thumbnail', inplace=True)
-    print("start the openserach part")
-    save_to_es(position_df)
+
+if __name__ == "__main__":
+    scrape_all()
