@@ -54,7 +54,7 @@ A recruitment agency already has a pool of candidates while fetching numerous jo
 ## Data Collection: 
  - Job Descriptions: 
    - Source: Scrape data from job sites like LinkedIn 
-   - Method: Utilize a web scraper like **Apify** to automate the collection of job descriptions. 
+   - Method: Utilize a free, open-source web scraper (**JobSpy**) to automate the collection of job descriptions. 
 
 - Resumes and User Preferences: 
   - Source: Directly from job seekers through a web frontend 
@@ -109,6 +109,56 @@ We assume 100 job seekers, 1 job description. The average tokens for a job seeke
 We estimate everyday, we have an average 1000 new job posts. Thus the daily cost is 1000$. 
 For the output, we expect ranking results per job post.
 Output token cost is $0.01 per 1,000 token. Output cost per job post is less than 1000 token, but for convenience, we say it cost 0.01$ 
+
+
+# Free / Self-Hosted Stack
+
+The pipeline originally relied on several paid services. This branch swaps each one
+for a free, mostly local alternative so the whole system can run on your own machine
+at no cost:
+
+| Original (paid)        | Free replacement                                   | Used in |
+|------------------------|----------------------------------------------------|---------|
+| OpenAI GPT-3.5         | **Ollama** local LLM (e.g. `llama3.1`)             | `utils.get_llm` |
+| OpenAI embeddings      | **HuggingFace** `sentence-transformers` (local)    | `utils.get_embeddings` |
+| Apify Google-jobs actor| **JobSpy** (`python-jobspy`) — Indeed/Google/etc.  | `job_scraper.py` |
+| AWS OpenSearch         | **Local CSV document store** (`./data/local_store`)| `utils.save_documents` / `load_documents` |
+| AWS S3 (resume bucket) | **Local folder** (`./data/resumes`)                | `web.py` |
+| SendGrid               | **SMTP** via stdlib `smtplib` (e.g. Gmail)         | `matching.py` |
+
+FAISS (vector search) was already free and is unchanged. AWS Lambda/Chalice and
+DynamoDB are optional — for a fully free setup, run `python job_scraper.py` from
+cron instead of deploying the Lambda.
+
+## Setup
+
+```bash
+cd swift_mytodo
+pip install -r requirements.txt
+
+# Local LLM (one-time)
+brew install ollama        # or see https://ollama.com
+ollama serve &
+ollama pull llama3.1
+
+# Email credentials for sending recommendations
+cp credential.txt.example credential.txt   # then add a Gmail app password
+```
+
+Optional environment overrides: `LLM_MODEL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`,
+`LOCAL_STORE_DIR`, `RESUME_DIR`, `JOBSPY_SITES`, `JOBSPY_COUNTRY`. To use Gemini or
+Groq (also free tiers) instead of Ollama, swap the single return line in
+`utils.get_llm()`.
+
+## Run the pipeline
+
+```bash
+python job_scraper.py                 # 1. scrape jobs -> ./data/local_store/jobs.csv
+streamlit run web.py                  # 2. job seekers upload resumes -> ./data/resumes
+python resume_summary.py              # 3. summarize resumes -> ./data/local_store/resumes.csv
+python matching.py                    # 4. match + email recommendations
+```
+
 
 
 
