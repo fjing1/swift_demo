@@ -1,0 +1,12 @@
+# Project virtualenv (named after the repo, created for the resume->jobs match)
+/swift_demo/
+
+# Personal, machine-specific Claude settings (permissions + SessionStart hook)
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store

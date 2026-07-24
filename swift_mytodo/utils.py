@@ -91,6 +91,26 @@ def load_specific_api_key(filename='credential.txt', key_name='smtp_user'):
     return None
 
 
+def read_resume(pdf_path):
+    """Extract the plain text of a resume PDF (no LLM / RAG involved).
+
+    A lightweight helper for quickly inspecting or debugging resume content,
+    separate from the RAG summarization in resume_summary.py. Uses pypdf
+    directly (already a dependency).
+
+    :param pdf_path: path to a PDF file.
+    :return: the concatenated text of every page as a single string.
+    """
+    from pypdf import PdfReader
+
+    if not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"Resume PDF not found: {pdf_path}")
+
+    reader = PdfReader(pdf_path)
+    pages = (page.extract_text() or "" for page in reader.pages)
+    return "\n".join(pages).strip()
+
+
 def format_docs(docs):
     return "\n".join(doc.page_content for doc in docs)
 

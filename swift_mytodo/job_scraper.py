@@ -16,13 +16,13 @@ from jobspy import scrape_jobs
 import utils
 
 JOB_TITLES = ["Software Engineer", "Data Engineer", "Data Scientist"]
-LOCATIONS = ["Toronto, ON", "Vancouver, BC", "Montreal, QC"]
+LOCATIONS = ["Austin, TX", "Remote"]
 
 # Which job boards to scrape (comma-separated env override).
 SITES = os.environ.get("JOBSPY_SITES", "indeed,google").split(",")
 RESULTS_WANTED = int(os.environ.get("JOBSPY_RESULTS", "20"))
 HOURS_OLD = int(os.environ.get("JOBSPY_HOURS_OLD", "72"))
-COUNTRY = os.environ.get("JOBSPY_COUNTRY", "Canada")
+COUNTRY = os.environ.get("JOBSPY_COUNTRY", "USA")
 
 JOBS_INDEX = "jobs"
 
@@ -48,6 +48,12 @@ def get_job_data(job_title, location):
     # Expose the listing URL as `applyLink` so the matching prompt can cite it.
     if "job_url" in df.columns:
         df["applyLink"] = df["job_url"]
+    if "job_type" in df.columns:
+        job_type = df["job_type"].fillna("").str.lower()
+        is_fulltime_permanent = job_type.str.contains("fulltime") & ~job_type.str.contains(
+            "contract|temporary|parttime", regex=True
+        )
+        df = df[is_fulltime_permanent]
     return df
 
 
