@@ -34,7 +34,7 @@ if ! "$PY" job_scraper.py >/dev/null 2>&1; then
 fi
 
 # 2. Rank the resume against the jobs by embedding similarity.
-RAW="$("$PY" match_one.py "$RESUME" --no-llm --top-n 5 2>/dev/null)"
+RAW="$("$PY" match_one.py "$RESUME" --no-llm --top-n 20 2>/dev/null)"
 
 # 3. Emit just the ranked matches (and cache them).
 mkdir -p "$(dirname "$OUT")"
