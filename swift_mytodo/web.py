@@ -11,6 +11,8 @@ import os
 
 import streamlit as st
 
+import resume_review
+
 # Keep this in sync with utils.RESUME_DIR (same default + env override) without
 # importing the heavier LLM stack into the uploader.
 RESUME_DIR = os.environ.get("RESUME_DIR", "./data/resumes")
@@ -46,6 +48,30 @@ def main(resume_dir):
             s3_filename = f"{first_name}_{last_name}_{target_title}_{target_location}_{email}.pdf"
             save_resume_locally(uploaded_file, resume_dir, s3_filename)
             st.success("Your resume has been uploaded successfully!")
+
+    if uploaded_file is not None and st.button('Review my resume'):
+        show_review(uploaded_file)
+
+
+def show_review(uploaded_file):
+    """Show rule-based suggestions for presenting the resume better."""
+    report = resume_review.review_resume(
+        resume_review.extract_text(uploaded_file), source=uploaded_file.name
+    )
+    st.subheader(f'Resume review: {report.score}/100')
+    st.caption(f'{report.bullet_count} bullets, {report.quantified_count} with a number')
+    for fix in report.top_fixes:
+        st.markdown(f'- {fix}')
+    for issue in report.doc_issues:
+        st.info(issue.message)
+    for r in sorted((r for r in report.bullets if r.issues), key=lambda r: r.score):
+        with st.expander(f'#{r.index} {r.context} (score {r.score}): {r.original[:60]}...'):
+            st.markdown(f'**Original:** {r.original}')
+            for issue in r.issues:
+                st.markdown(f'- {issue.message}')
+            if r.suggestion:
+                st.markdown(f'**Suggested:** {r.suggestion}')
+    st.caption('Placeholders in [brackets] are for you to fill with real figures.')
 
 
 if __name__ == "__main__":

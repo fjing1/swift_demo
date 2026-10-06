@@ -119,7 +119,7 @@ at no cost:
 
 | Original (paid)        | Free replacement                                   | Used in |
 |------------------------|----------------------------------------------------|---------|
-| OpenAI GPT-3.5         | **Ollama** local LLM (e.g. `llama3.1`)             | `utils.get_llm` |
+| OpenAI GPT-3.5         | **Claude Opus** via Anthropic API (default, paid), or **Ollama** local LLM (`LLM_PROVIDER=ollama`, free) | `utils.get_llm` |
 | OpenAI embeddings      | **HuggingFace** `sentence-transformers` (local)    | `utils.get_embeddings` |
 | Apify Google-jobs actor| **JobSpy** (`python-jobspy`) — Indeed/Google/etc.  | `job_scraper.py` |
 | AWS OpenSearch         | **Local CSV document store** (`./data/local_store`)| `utils.save_documents` / `load_documents` |
@@ -136,19 +136,24 @@ cron instead of deploying the Lambda.
 cd swift_mytodo
 pip install -r requirements.txt
 
-# Local LLM (one-time)
+# LLM: Claude (default) - needs an Anthropic API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# ...or a free local LLM instead (one-time)
 brew install ollama        # or see https://ollama.com
 ollama serve &
 ollama pull llama3.1
+export LLM_PROVIDER=ollama
 
 # Email credentials for sending recommendations
 cp credential.txt.example credential.txt   # then add a Gmail app password
 ```
 
-Optional environment overrides: `LLM_MODEL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`,
-`LOCAL_STORE_DIR`, `RESUME_DIR`, `JOBSPY_SITES`, `JOBSPY_COUNTRY`. To use Gemini or
-Groq (also free tiers) instead of Ollama, swap the single return line in
-`utils.get_llm()`.
+Optional environment overrides: `LLM_PROVIDER` (`anthropic` | `ollama`),
+`ANTHROPIC_MODEL` (default `claude-opus-5-5`), `ANTHROPIC_EFFORT` (default `medium`),
+`ANTHROPIC_FALLBACKS` (set `0` behind Vertex AI/Bedrock or a proxy that forwards to
+them), `LLM_MODEL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `LOCAL_STORE_DIR`,
+`RESUME_DIR`, `JOBSPY_SITES`, `JOBSPY_COUNTRY`.
 
 ## Run the pipeline
 
@@ -165,3 +170,24 @@ python matching.py                    # 4. match + email recommendations
 
  
 
+
+## Review a resume
+
+Many engineers undersell themselves on paper ("Contributed to...", no numbers,
+skills listed but never shown). `resume_review.py` suggests small, concrete
+edits bullet by bullet without rewriting the resume or inventing facts.
+
+```bash
+python resume_review.py resume.pdf          # rule-based review, no LLM needed
+python resume_review.py resume.pdf --top 5  # only the 5 weakest bullets
+python resume_review.py resume.pdf --llm    # + minimal rewrites via Claude (or Ollama)
+python resume_review.py resume.pdf --json   # machine-readable report
+python -m unittest test_resume_review       # tests
+```
+
+It flags weak openers, missing metrics, vague words, soft-skill filler,
+pronouns, overlong bullets, typos, overused verbs, and skills with no evidence
+in the experience section. LLM rewrites that introduce numbers not in the
+original are discarded; missing metrics come back as `[placeholders]` to fill
+in. The same review is available in the uploader (`streamlit run web.py`, then
+"Review my resume").

@@ -6,7 +6,7 @@ prints the result.
 
 Two ranking modes:
   - default  : summarize the resume with the local LLM, then rank with the same
-               RAG prompt the bulk pipeline uses (needs Ollama running).
+               RAG prompt the bulk pipeline uses (needs the LLM from utils.get_llm).
   - --no-llm : rank purely by embedding similarity (no LLM needed; uses the
                free local HuggingFace embeddings, so it runs anywhere).
 
@@ -16,7 +16,8 @@ Examples:
 
 Prerequisites:
   - Jobs already scraped into the local store:  python job_scraper.py
-  - For the default (LLM) mode: Ollama running with utils.LLM_MODEL pulled.
+  - For the default (LLM) mode: ANTHROPIC_API_KEY set, or LLM_PROVIDER=ollama
+    with Ollama running and utils.LLM_MODEL pulled.
 """
 import os
 import argparse
@@ -130,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--top-n", type=int, default=3,
                         help="How many matches to show in --no-llm mode (default 3).")
     parser.add_argument("--no-llm", dest="use_llm", action="store_false",
-                        help="Rank by embedding similarity only (no Ollama needed).")
+                        help="Rank by embedding similarity only (no LLM needed).")
     cli = parser.parse_args()
 
     matches = match_one(

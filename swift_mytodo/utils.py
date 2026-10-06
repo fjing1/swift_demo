@@ -1,7 +1,8 @@
-"""Shared helpers for the free / self-hosted SmartHire stack.
+"""Shared helpers for the SmartHire stack.
 
-This module replaces the previous *paid* dependencies with free, local ones:
-  - OpenAI chat model      -> Ollama (local LLM, e.g. llama3.1)
+This module replaces the previous AWS/OpenAI dependencies:
+  - OpenAI chat model      -> Claude Opus via the Anthropic API (default), or a
+                              free local Ollama model (LLM_PROVIDER=ollama)
   - OpenAI embeddings      -> HuggingFace sentence-transformers (local)
   - AWS OpenSearch indices -> local CSV-backed document store (./data/local_store)
 
@@ -9,19 +10,36 @@ Vector search still uses FAISS, which was already free.
 """
 import os
 import ast
+from functools import lru_cache
 
 import pandas as pd
 
 from langchain_community.vectorstores import FAISS
+from langchain_core.messages import AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 
 
 # --- Configuration (override any of these via environment variables) --------
-# Local LLM served by Ollama (https://ollama.com). One-time setup:
+# Which chat LLM get_llm() returns: "anthropic" (Claude, default) or "ollama".
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").lower()
+
+# Claude via the Anthropic API. Credentials come from ANTHROPIC_API_KEY (or an
+# `ant auth login` profile). Effort trades depth for speed/cost:
+# low | medium | high | xhigh | max.
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5-5")
+ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "medium")
+# Server-side refusal fallbacks: if a safety classifier declines, the API retries
+# on Anthropic's recommended fallback model instead of refusing. Only the direct
+# Anthropic API supports this; set ANTHROPIC_FALLBACKS=0 behind Vertex AI,
+# Bedrock, or a proxy that forwards to them.
+ANTHROPIC_FALLBACKS = os.environ.get("ANTHROPIC_FALLBACKS", "1") != "0"
+
+# Local LLM served by Ollama (https://ollama.com), used when LLM_PROVIDER=ollama.
+# One-time setup:
 #   brew install ollama && ollama serve
 #   ollama pull llama3.1
 LLM_MODEL = os.environ.get("LLM_MODEL", "llama3.1")
@@ -50,15 +68,43 @@ _RAG_PROMPT = ChatPromptTemplate.from_template(
 
 
 def get_llm():
-    """Return the chat LLM. Free local default: Ollama.
+    """Return the chat LLM as a LangChain runnable, chosen by LLM_PROVIDER.
 
-    To use another free provider instead, swap the return line, e.g.:
-      from langchain_google_genai import ChatGoogleGenerativeAI  # Gemini free tier
-      return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-      from langchain_groq import ChatGroq                        # Groq free tier
-      return ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+    Both providers accept a prompt string (or prompt value) via .invoke() and
+    return a message with .content, so they plug into the same chains.
+      - "anthropic" (default): Claude through the official Anthropic SDK.
+      - "ollama": free local model, no API key or network needed.
     """
-    return ChatOllama(model=LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
+    if LLM_PROVIDER == "anthropic":
+        return RunnableLambda(_claude_invoke, name="claude")
+    if LLM_PROVIDER == "ollama":
+        return ChatOllama(model=LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
+    raise ValueError(f"Unknown LLM_PROVIDER {LLM_PROVIDER!r}; use 'anthropic' or 'ollama'.")
+
+
+@lru_cache(maxsize=1)
+def _anthropic_client():
+    import anthropic
+
+    return anthropic.Anthropic()
+
+
+def _claude_invoke(prompt):
+    """Send one prompt to Claude and return the reply as an AIMessage."""
+    text = prompt if isinstance(prompt, str) else prompt.to_string()
+    fallback = ({"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
+                if ANTHROPIC_FALLBACKS else {})
+    response = _anthropic_client().beta.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=16000,
+        output_config={"effort": ANTHROPIC_EFFORT},
+        messages=[{"role": "user", "content": text}],
+        **fallback,
+    )
+    if response.stop_reason == "refusal":
+        category = response.stop_details.category if response.stop_details else None
+        raise RuntimeError(f"Claude declined the request (category: {category}).")
+    return AIMessage(content="".join(b.text for b in response.content if b.type == "text"))
 
 
 def get_embeddings():

@@ -5,7 +5,8 @@ PyJWT==1.6.1
 # Job scraping (replaces paid Apify)
 python-jobspy
 
-# LLM + RAG, all free/local (replaces paid OpenAI)
+# LLM: Claude via the Anthropic API (default), or free local Ollama
+anthropic
 langchain
 langchain-core
 langchain-community
